@@ -2,6 +2,8 @@ const OLLAMA_URL = "http://localhost:11434/api/chat";
 
 const menuForModel = menu.map((item) => ({ id: item.id, name: item.name }));
 
+let message = [];
+
 const orderPrompt = `Tu prends les commandes du café Sésame, qui vend des cafés, des thés et des pâtisseries.
 Voici la carte : ${JSON.stringify(menuForModel)}
 Pour chaque produit commandé par le client, renvoie son id (celui de la carte) et sa quantité.`;
@@ -37,4 +39,33 @@ async function askModel(messages) {
     throw new Error(data.error);
   }
   return JSON.parse(data.message.content);
+}
+
+const aiOrderForm = document.querySelector("#ai-order-form");
+const aiOrderInput = document.querySelector("#ai-order-input");
+const aiOrderMessage = document.querySelector("#ai-order-message");
+const aiOrderBtn = document.querySelector("#ai-order-button");
+
+aiOrderForm.addEventListener("submit", handleSubmitOrderForm);
+
+async function handleSubmitOrderForm(e) {
+  e.preventDefault();
+  const value = aiOrderInput.value;
+  aiOrderBtn.disabled = true;
+  aiOrderMessage.textContent = "Qwen prend la commande…";
+  message.push({ role: "system", content: orderPrompt });
+  message.push({ role: "user", content: value });
+  const response = await askModel(message);
+  response.lines.forEach((line) => {
+    const product = menu.find((item) => item.id === line.id);
+    for (let index = 0; index < line.quantity; index++) {
+      order.add(product);
+    }
+  });
+  renderTicket();
+
+  aiOrderBtn.disabled = false;
+  aiOrderMessage.textContent = "";
+  aiOrderInput.value = "";
+  message = [];
 }
