@@ -47,9 +47,9 @@ const aiOrderMessage = document.querySelector("#ai-order-message");
 const aiOrderBtn = document.querySelector("#ai-order-button");
 
 aiOrderForm.addEventListener("submit", handleSubmitOrderForm);
-
 async function handleSubmitOrderForm(e) {
   e.preventDefault();
+  let errorMsg = [];
   const value = aiOrderInput.value;
   aiOrderBtn.disabled = true;
   aiOrderMessage.textContent = "Qwen prend la commande…";
@@ -58,14 +58,30 @@ async function handleSubmitOrderForm(e) {
   const response = await askModel(message);
   response.lines.forEach((line) => {
     const product = menu.find((item) => item.id === line.id);
+    if (!product) {
+      errorMsg.push(`Produit introuvable`);
+      return;
+    }
+    if (!product.available) {
+      errorMsg.push(`Produit ${product.name} indisponible`);
+      return;
+    }
+    if (
+      line.quantity < 1 ||
+      line.quantity > 10 ||
+      !Number.isInteger(line.quantity)
+    ) {
+      errorMsg.push("Quantité invalide");
+      return;
+    }
     for (let index = 0; index < line.quantity; index++) {
       order.add(product);
     }
   });
+  aiOrderMessage.textContent = errorMsg;
   renderTicket();
 
   aiOrderBtn.disabled = false;
-  aiOrderMessage.textContent = "";
   aiOrderInput.value = "";
   message = [];
 }
