@@ -14,6 +14,21 @@ async function askModel(messages) {
       model: "qwen3.5:4b",
       think: false,
       stream: false,
+      format: {
+        type: "object",
+        properties: {
+          lines: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                id: { type: "integer" },
+                quantity: { type: "integer" },
+              },
+            },
+          },
+        },
+      },
       messages: messages,
     }),
   });
@@ -21,5 +36,5 @@ async function askModel(messages) {
   if (!response.ok) {
     throw new Error(data.error);
   }
-  return data.message.content;
+  return JSON.parse(data.message.content);
 }
