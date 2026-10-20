@@ -49,36 +49,44 @@ const aiOrderBtn = document.querySelector("#ai-order-button");
 aiOrderForm.addEventListener("submit", handleSubmitOrderForm);
 async function handleSubmitOrderForm(e) {
   e.preventDefault();
-  let errorMsg = [];
-  const value = aiOrderInput.value;
-  aiOrderBtn.disabled = true;
-  aiOrderMessage.textContent = "Qwen prend la commande…";
-  message.push({ role: "system", content: orderPrompt });
-  message.push({ role: "user", content: value });
-  const response = await askModel(message);
-  response.lines.forEach((line) => {
-    const product = menu.find((item) => item.id === line.id);
-    if (!product) {
-      errorMsg.push(`Produit introuvable`);
-      return;
-    }
-    if (!product.available) {
-      errorMsg.push(`Produit ${product.name} indisponible`);
-      return;
-    }
-    if (
-      line.quantity < 1 ||
-      line.quantity > 10 ||
-      !Number.isInteger(line.quantity)
-    ) {
-      errorMsg.push("Quantité invalide");
-      return;
-    }
-    for (let index = 0; index < line.quantity; index++) {
-      order.add(product);
-    }
-  });
-  aiOrderMessage.textContent = errorMsg;
+  aiOrderMessage.classList.remove("is-error");
+  try {
+    let errorMsg = [];
+    const value = aiOrderInput.value;
+    aiOrderBtn.disabled = true;
+    aiOrderMessage.textContent = "Qwen prend la commande…";
+    message.push({ role: "system", content: orderPrompt });
+    message.push({ role: "user", content: value });
+    const response = await askModel(message);
+    response.lines.forEach((line) => {
+      const product = menu.find((item) => item.id === line.id);
+      if (!product) {
+        errorMsg.push(`Produit introuvable`);
+        return;
+      }
+      if (!product.available) {
+        errorMsg.push(`Produit ${product.name} indisponible`);
+        return;
+      }
+      if (
+        line.quantity < 1 ||
+        line.quantity > 10 ||
+        !Number.isInteger(line.quantity)
+      ) {
+        errorMsg.push("Quantité invalide");
+        return;
+      }
+      for (let index = 0; index < line.quantity; index++) {
+        order.add(product);
+      }
+    });
+    aiOrderMessage.textContent = errorMsg;
+  } catch (e) {
+    aiOrderMessage.textContent =
+      "L'IA ne répond pas : prends la commande à la main";
+    aiOrderMessage.classList.add("is-error");
+    console.error(e);
+  }
   renderTicket();
 
   aiOrderBtn.disabled = false;
