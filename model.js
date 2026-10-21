@@ -6,7 +6,7 @@ let message = [];
 
 const orderPrompt = `Tu prends les commandes du café Sésame, qui vend des cafés, des thés et des pâtisseries.
 Voici la carte : ${JSON.stringify(menuForModel)}
-Pour chaque produit commandé par le client, renvoie son id (celui de la carte) et sa quantité.`;
+Pour chaque produit commandé par le client, renvoie son id (celui de la carte) et sa quantité. Si tu détecte un prénom tu le rajoute a "customer" si il y en a pas tu laisse vide.`;
 
 async function askModel(messages) {
   const response = await fetch(OLLAMA_URL, {
@@ -27,9 +27,12 @@ async function askModel(messages) {
                 id: { type: "integer" },
                 quantity: { type: "integer" },
               },
+              required: ["id", "quantity"],
             },
           },
+          customer: { type: "string" },
         },
+        required: ["lines", "customer"],
       },
       messages: messages,
     }),
@@ -58,6 +61,9 @@ async function handleSubmitOrderForm(e) {
     message.push({ role: "system", content: orderPrompt });
     message.push({ role: "user", content: value });
     const response = await askModel(message);
+    if (response.customer) {
+      order.customer = response.customer;
+    }
     response.lines.forEach((line) => {
       const product = menu.find((item) => item.id === line.id);
       if (!product) {
