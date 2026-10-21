@@ -1,19 +1,21 @@
 const OLLAMA_URL = "http://localhost:11434/api/chat";
 
 const menuForModel = menu.map((item) => ({ id: item.id, name: item.name }));
-const menuForModelOnlyAvailable = menu
+const availableMenuForModel = menu
   .filter((item) => item.available)
   .map((item) => ({ id: item.id, name: item.name }));
 
-let message = [];
-let messageAdvice = [];
+let orderMessages = [];
+let adviceMessages = [];
 
-const orderPrompt = `Tu prends les commandes du café Sésame, qui vend des cafés, des thés et des pâtisseries.
+const orderSystemPrompt = `Tu prends les commandes du café Sésame, qui vend des cafés, des thés et des pâtisseries.
 Voici la carte : ${JSON.stringify(menuForModel)}
 Pour chaque produit commandé par le client, renvoie son id (celui de la carte) et sa quantité. Si tu détecte un prénom tu le rajoute a "customer" si il y en a pas tu laisse vide.`;
 
-const advicePrompt = `Tu prends les commandes du café Sésame, qui vend des cafés, des thés et des pâtisseries.
-Voici la carte : ${JSON.stringify(menuForModelOnlyAvailable)}. Le vendeur va te donner l'envie du client, par exemple (le client aimerais une pâtisserie sucré salé). Tu va donc lui conseiller un carrot cake. Tu va me renvoyer au plus deux id de produit avec une phrase pour expliquer ton choix que tu va mettre dans "explanationSentence". Ce n'est pas une commande que tu fais ici mais juste un conseils.`;
+const adviceSystemPrompt = `Tu prends les commandes du café Sésame, qui vend des cafés, des thés et des pâtisseries.
+Voici la carte : ${JSON.stringify(availableMenuForModel)}. Le vendeur va te donner l'envie du client, par exemple (le client aimerais une pâtisserie sucré salé). Tu va donc lui conseiller un carrot cake. Tu va me renvoyer au plus deux id de produit avec une phrase pour expliquer ton choix que tu va mettre dans "explanationSentence". Ce n'est pas une commande que tu fais ici mais juste un conseils.`;
+
+// =======================================================================
 
 async function askModel(messages, format) {
   const response = await fetch(OLLAMA_URL, {
@@ -34,23 +36,31 @@ async function askModel(messages, format) {
   return JSON.parse(data.message.content);
 }
 
+// =======================================================================
+
+
+function addMessages(messages, systemPrompt, userContent) {
+  messages.push({ role: "system", content: systemPrompt });
+  messages.push({ role: "user", content: userContent });
+}
+
 const aiOrderForm = document.querySelector("#ai-order-form");
 const aiOrderInput = document.querySelector("#ai-order-input");
 const aiOrderMessage = document.querySelector("#ai-order-message");
-const aiOrderBtn = document.querySelector("#ai-order-button");
+const aiOrderButton = document.querySelector("#ai-order-button");
 
 aiOrderForm.addEventListener("submit", handleSubmitOrderForm);
-async function handleSubmitOrderForm(e) {
-  e.preventDefault();
+
+async function handleSubmitOrderForm(event) {
+  event.preventDefault();
   aiOrderMessage.classList.remove("is-error");
   try {
-    let errorMsg = [];
-    const value = aiOrderInput.value;
-    aiOrderBtn.disabled = true;
+    let errors = [];
+    const customerRequest = aiOrderInput.value;
+    aiOrderButton.disabled = true;
     aiOrderMessage.textContent = "Qwen prend la commande…";
-    message.push({ role: "system", content: orderPrompt });
-    message.push({ role: "user", content: value });
-    const response = await askModel(message, {
+    addMessages(orderMessages, orderSystemPrompt, customerRequest);
+    const orderAnswer = await askModel(orderMessages, {
       type: "object",
       properties: {
         lines: {
@@ -69,17 +79,17 @@ async function handleSubmitOrderForm(e) {
       required: ["lines", "customer"],
     });
 
-    if (response.customer) {
-      order.customer = response.customer;
+    if (orderAnswer.customer) {
+      order.customer = orderAnswer.customer;
     }
-    response.lines.forEach((line) => {
+    orderAnswer.lines.forEach((line) => {
       const product = menu.find((item) => item.id === line.id);
       if (!product) {
-        errorMsg.push(`Produit introuvable`);
+        errors.push(`Produit introuvable`);
         return;
       }
       if (!product.available) {
-        errorMsg.push(`Produit ${product.name} indisponible`);
+        errors.push(`Produit ${product.name} indisponible`);
         return;
       }
       if (
@@ -87,46 +97,70 @@ async function handleSubmitOrderForm(e) {
         line.quantity > 10 ||
         !Number.isInteger(line.quantity)
       ) {
-        errorMsg.push("Quantité invalide");
+        errors.push("Quantité invalide");
         return;
       }
       for (let index = 0; index < line.quantity; index++) {
         order.add(product);
       }
     });
-    aiOrderMessage.textContent = errorMsg;
-  } catch (e) {
+    aiOrderMessage.textContent = errors;
+  } catch (error) {
     aiOrderMessage.textContent =
       "L'IA ne répond pas : prends la commande à la main";
     aiOrderMessage.classList.add("is-error");
-    console.error(e);
+    console.error(error);
   }
   renderTicket();
 
-  aiOrderBtn.disabled = false;
+  aiOrderButton.disabled = false;
   aiOrderInput.value = "";
-  message = [];
+  orderMessages = [];
 }
+
+// =======================================================================
 
 const aiAdviceForm = document.querySelector("#ai-advice-form");
 aiAdviceForm.addEventListener("submit", handleSubmitAdviceForm);
 const aiAdviceInput = document.querySelector("#ai-advice-input");
 const aiAdviceMessage = document.querySelector("#ai-advice-message");
-const aiAdviceBtn = document.querySelector("#ai-advice-btn");
+const aiAdviceButton = document.querySelector("#ai-advice-btn");
 
-async function handleSubmitAdviceForm(e) {
-  e.preventDefault();
-  const activeCategorie = document.querySelector(".is-active");
+function clearSuggestions() {
   document.querySelectorAll(".product").forEach((product) => {
     product.classList.remove("is-suggested");
   });
+}
+
+function addSuggestedIds(adviceAnswer) {
+  adviceAnswer.lines.slice(0, 2).forEach((productId) => {
+    const product = menu.find((item) => item.id === productId);
+    if (!product) {
+      return;
+    }
+    if (!product.available) {
+      return;
+    }
+    suggestedIds.push(product.id);
+  });
+}
+function resetAdviceForm() {
+  aiAdviceButton.disabled = false;
+  aiAdviceInput.value = "";
+  adviceMessages = [];
+}
+async function handleSubmitAdviceForm(event) {
+  event.preventDefault();
   suggestedIds = [];
-  const value = aiAdviceInput.value;
+  const activeCategoryButton = document.querySelector(".is-active");
+  const customerWish = aiAdviceInput.value;
+  aiAdviceButton.disabled = true;
+
+  clearSuggestions();
+  addMessages(adviceMessages, adviceSystemPrompt, customerWish);
+
   try {
-    aiAdviceBtn.disabled = true;
-    messageAdvice.push({ role: "system", content: advicePrompt });
-    messageAdvice.push({ role: "user", content: value });
-    const response = await askModel(messageAdvice, {
+    const adviceAnswer = await askModel(adviceMessages, {
       type: "object",
       properties: {
         lines: {
@@ -137,26 +171,15 @@ async function handleSubmitAdviceForm(e) {
       },
       required: ["lines", "explanationSentence"],
     });
-    console.log(response);
 
-    response.lines.slice(0, 2).forEach((line) => {
-      const product = menu.find((item) => item.id === line);
-      if (!product) {
-        return;
-      }
-      if (!product.available) {
-        return;
-      }
-      suggestedIds.push(product.id);
-    });
-    aiAdviceMessage.textContent = response.explanationSentence;
-    renderMenu(activeCategorie.value);
-  } catch (e) {
+    addSuggestedIds(adviceAnswer);
+
+    aiAdviceMessage.textContent = adviceAnswer.explanationSentence;
+    renderMenu(activeCategoryButton.value);
+  } catch (error) {
     aiAdviceMessage.textContent =
       "L'IA ne répond pas : prends la commande à la main";
-    console.error(e);
+    console.error(error);
   }
-  aiAdviceBtn.disabled = false;
-  aiAdviceInput.value = "";
-  messageAdvice = [];
+  resetAdviceForm();
 }
