@@ -1,7 +1,6 @@
 const OLLAMA_URL = "http://localhost:11434/api/chat";
 
-const menuForModel = menu.map((item) => ({ id: item.id, name: item.name }));
-const availableMenuForModel = menu
+const menuForModel = menu
   .filter((item) => item.available)
   .map((item) => ({ id: item.id, name: item.name }));
 
@@ -13,7 +12,38 @@ Voici la carte : ${JSON.stringify(menuForModel)}
 Pour chaque produit commandé par le client, renvoie son id (celui de la carte) et sa quantité. Si tu détecte un prénom tu le rajoute a "customer" si il y en a pas tu laisse vide.`;
 
 const adviceSystemPrompt = `Tu prends les commandes du café Sésame, qui vend des cafés, des thés et des pâtisseries.
-Voici la carte : ${JSON.stringify(availableMenuForModel)}. Le vendeur va te donner l'envie du client, par exemple (le client aimerais une pâtisserie sucré salé). Tu va donc lui conseiller un carrot cake. Tu va me renvoyer au plus deux id de produit avec une phrase pour expliquer ton choix que tu va mettre dans "explanationSentence". Ce n'est pas une commande que tu fais ici mais juste un conseils.`;
+Voici la carte : ${JSON.stringify(menuForModel)}. Le vendeur va te donner l'envie du client, par exemple (le client aimerais une pâtisserie sucré salé). Tu va donc lui conseiller un carrot cake. Tu va me renvoyer au plus deux id de produit avec une phrase pour expliquer ton choix que tu va mettre dans "explanationSentence". Ce n'est pas une commande que tu fais ici mais juste un conseils.`;
+
+const adviceAnswerFormat = {
+  type: "object",
+  properties: {
+    lines: {
+      type: "array",
+      items: { type: "integer" },
+    },
+    explanationSentence: { type: "string" },
+  },
+  required: ["lines", "explanationSentence"],
+};
+
+const orderAnswerFormat = {
+  type: "object",
+  properties: {
+    lines: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          quantity: { type: "integer" },
+        },
+        required: ["id", "quantity"],
+      },
+    },
+    customer: { type: "string" },
+  },
+  required: ["lines", "customer"],
+};
 
 // =======================================================================
 
@@ -29,19 +59,36 @@ async function askModel(messages, format) {
       messages: messages,
     }),
   });
-  const data = await response.json();
+  const responseBody = await response.json();
   if (!response.ok) {
-    throw new Error(data.error);
+    throw new Error(responseBody.error);
   }
-  return JSON.parse(data.message.content);
+  return JSON.parse(responseBody.message.content);
 }
 
 // =======================================================================
 
-
 function addMessages(messages, systemPrompt, userContent) {
   messages.push({ role: "system", content: systemPrompt });
   messages.push({ role: "user", content: userContent });
+}
+
+function constructErrorMsg(target) {
+  target.classList.add("is-error");
+  target.textContent = "L'IA ne répond pas : prends la commande à la main";
+}
+
+function findProduct(id) {
+  return menu.find((item) => item.id === id);
+}
+
+function getProductError(product) {
+  if (!product) {
+    return "Produit introuvable";
+  }
+  if (!product.available) {
+    return `Produit ${product.name} indisponible`;
+  }
 }
 
 const aiOrderForm = document.querySelector("#ai-order-form");
@@ -51,71 +98,66 @@ const aiOrderButton = document.querySelector("#ai-order-button");
 
 aiOrderForm.addEventListener("submit", handleSubmitOrderForm);
 
-async function handleSubmitOrderForm(event) {
-  event.preventDefault();
-  aiOrderMessage.classList.remove("is-error");
-  try {
-    let errors = [];
-    const customerRequest = aiOrderInput.value;
-    aiOrderButton.disabled = true;
-    aiOrderMessage.textContent = "Qwen prend la commande…";
-    addMessages(orderMessages, orderSystemPrompt, customerRequest);
-    const orderAnswer = await askModel(orderMessages, {
-      type: "object",
-      properties: {
-        lines: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              id: { type: "integer" },
-              quantity: { type: "integer" },
-            },
-            required: ["id", "quantity"],
-          },
-        },
-        customer: { type: "string" },
-      },
-      required: ["lines", "customer"],
-    });
-
-    if (orderAnswer.customer) {
-      order.customer = orderAnswer.customer;
-    }
-    orderAnswer.lines.forEach((line) => {
-      const product = menu.find((item) => item.id === line.id);
-      if (!product) {
-        errors.push(`Produit introuvable`);
-        return;
-      }
-      if (!product.available) {
-        errors.push(`Produit ${product.name} indisponible`);
-        return;
-      }
-      if (
-        line.quantity < 1 ||
-        line.quantity > 10 ||
-        !Number.isInteger(line.quantity)
-      ) {
-        errors.push("Quantité invalide");
-        return;
-      }
-      for (let index = 0; index < line.quantity; index++) {
-        order.add(product);
-      }
-    });
-    aiOrderMessage.textContent = errors;
-  } catch (error) {
-    aiOrderMessage.textContent =
-      "L'IA ne répond pas : prends la commande à la main";
-    aiOrderMessage.classList.add("is-error");
-    console.error(error);
+function getOrderLineError(product, line) {
+  const productError = getProductError(product);
+  if (productError) {
+    return productError;
   }
-  renderTicket();
+  if (
+    line.quantity < 1 ||
+    line.quantity > 10 ||
+    !Number.isInteger(line.quantity)
+  ) {
+    return "Quantité invalide";
+  }
+}
 
+function applyOrderAnswer(orderAnswer) {
+  const errors = [];
+  if (orderAnswer.customer) {
+    order.customer = orderAnswer.customer;
+  }
+  orderAnswer.lines.forEach((line) => {
+    const product = findProduct(line.id);
+    const lineError = getOrderLineError(product, line);
+    if (lineError) {
+      errors.push(lineError);
+      return;
+    }
+    for (let index = 0; index < line.quantity; index++) {
+      order.add(product);
+    }
+  });
+  return errors;
+}
+
+function resetOrderForm() {
   aiOrderButton.disabled = false;
   aiOrderInput.value = "";
   orderMessages = [];
+}
+
+async function handleSubmitOrderForm(event) {
+  event.preventDefault();
+  const customerRequest = aiOrderInput.value;
+  aiOrderMessage.classList.remove("is-error");
+  aiOrderButton.disabled = true;
+  aiOrderMessage.textContent = "Qwen prend la commande…";
+  addMessages(orderMessages, orderSystemPrompt, customerRequest);
+
+  let orderAnswer;
+  try {
+    orderAnswer = await askModel(orderMessages, orderAnswerFormat);
+  } catch (error) {
+    constructErrorMsg(aiOrderMessage);
+    console.error(error);
+    return;
+  } finally {
+    resetOrderForm();
+  }
+
+  aiOrderMessage.textContent = applyOrderAnswer(orderAnswer);
+  renderTicket();
 }
 
 // =======================================================================
@@ -134,11 +176,8 @@ function clearSuggestions() {
 
 function addSuggestedIds(adviceAnswer) {
   adviceAnswer.lines.slice(0, 2).forEach((productId) => {
-    const product = menu.find((item) => item.id === productId);
-    if (!product) {
-      return;
-    }
-    if (!product.available) {
+    const product = findProduct(productId);
+    if (getProductError(product)) {
       return;
     }
     suggestedIds.push(product.id);
@@ -154,32 +193,24 @@ async function handleSubmitAdviceForm(event) {
   suggestedIds = [];
   const activeCategoryButton = document.querySelector(".is-active");
   const customerWish = aiAdviceInput.value;
+  aiAdviceMessage.classList.remove("is-error");
   aiAdviceButton.disabled = true;
 
   clearSuggestions();
   addMessages(adviceMessages, adviceSystemPrompt, customerWish);
 
+  let adviceAnswer;
   try {
-    const adviceAnswer = await askModel(adviceMessages, {
-      type: "object",
-      properties: {
-        lines: {
-          type: "array",
-          items: { type: "integer" },
-        },
-        explanationSentence: { type: "string" },
-      },
-      required: ["lines", "explanationSentence"],
-    });
-
-    addSuggestedIds(adviceAnswer);
-
-    aiAdviceMessage.textContent = adviceAnswer.explanationSentence;
-    renderMenu(activeCategoryButton.value);
+    adviceAnswer = await askModel(adviceMessages, adviceAnswerFormat);
   } catch (error) {
-    aiAdviceMessage.textContent =
-      "L'IA ne répond pas : prends la commande à la main";
+    constructErrorMsg(aiAdviceMessage);
     console.error(error);
+    return;
+  } finally {
+    resetAdviceForm();
   }
-  resetAdviceForm();
+
+  addSuggestedIds(adviceAnswer);
+  aiAdviceMessage.textContent = adviceAnswer.explanationSentence;
+  renderMenu(activeCategoryButton.value);
 }
