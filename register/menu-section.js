@@ -2,6 +2,7 @@
 
 const menuSection = document.querySelector("#menu");
 const categories = document.querySelector("#categories");
+let suggestedIds = [];
 
 function categoryLabel(category) {
   if (category === "coffee") {
@@ -41,6 +42,9 @@ function createProductCard(product) {
   if (product.available === false) {
     card.classList.add("is-sold-out");
     button.disabled = true;
+  }
+  if (suggestedIds.includes(product.id)) {
+    card.classList.add("is-suggested")
   }
 
   button.addEventListener("click", function () {
